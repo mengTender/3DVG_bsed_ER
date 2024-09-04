@@ -8,6 +8,7 @@ import numpy as np
 import subprocess
 import pandas as pd
 import re
+from torchvision.ops import roi_align
 
 
 def load_vit_model():
@@ -41,10 +42,15 @@ def get_transform():
 def load_model():
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
     model.eval()
+    hook = model.backbone.body.layer4.register_forward_hook(hook_fn)
     return model
 
 
-def detect_and_crop_objects(image_path, model, vit_model, output_dir, threshold=0.8):
+def hook_fn(module, input, output):
+    global feature_map
+    feature_map = output
+
+def detect_and_crop_objects(image_path, model, output_dir, threshold=0.8):
     image = Image.open(image_path).convert("RGB")
     transform = get_transform()
     vit_transform = T.Compose([
@@ -55,7 +61,7 @@ def detect_and_crop_objects(image_path, model, vit_model, output_dir, threshold=
 
     with torch.no_grad():
         predictions = model([image_tensor])
-
+    features = feature_map
     pred_classes = [COCO_INSTANCE_CATEGORY_NAMES[i] for i in predictions[0]['labels'].numpy()]
     pred_boxes = predictions[0]['boxes'].detach().numpy()
     pred_scores = predictions[0]['scores'].detach().numpy()
@@ -73,12 +79,15 @@ def detect_and_crop_objects(image_path, model, vit_model, output_dir, threshold=
                     f"Object {i}: Class={class_name}, x1={x1}, y1={y1}, x2={x2}, y2={y2}, width={width}, height={height}\n")
 
                 cropped_img = image.crop((x1, y1, x2, y2))
-                cropped_img_tensor = vit_transform(cropped_img).unsqueeze(0)
+                # cropped_img_tensor = vit_transform(cropped_img).unsqueeze(0)
 
-                with torch.no_grad():
-                    vit_features = vit_model(cropped_img_tensor).detach().cpu().numpy()
+                roi = [torch.cat(
+                    [torch.tensor([0]), pred_boxes[i].unsqueeze(0)])]
+
+                pooled_features = roi_align(feature_map, [roi], output_size=(7, 7), spatial_scale=1.0)
+                pooled_features = pooled_features.numpy()
                 feature_file_path = os.path.join(output_dir, f"{class_name}_{i}_features.npy")
-                np.save(feature_file_path, vit_features)
+                np.save(feature_file_path, pooled_features)
 
                 if class_name == 'person':
                     cropped_img_path = os.path.join(output_dir, f"person_{i}.jpg")
