@@ -68,8 +68,8 @@ def detect_and_crop_objects(image_path, model, output_dir, threshold=0.8):
 
     info_file_path = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(image_path))[0]}_info.txt")
     with open(info_file_path, 'w') as f_info:
+        agent_flag = False
         for i, box in enumerate(pred_boxes):
-            agent_flag = False
             if pred_scores[i] >= threshold:
                 class_name = pred_classes[i]
                 x1, y1, x2, y2 = box
@@ -85,16 +85,14 @@ def detect_and_crop_objects(image_path, model, output_dir, threshold=0.8):
                     [torch.tensor([0]), pred_boxes[i].unsqueeze(0)])]
 
                 pooled_features = roi_align(feature_map, [roi], output_size=(7, 7), spatial_scale=1.0)
-                pooled_features = pooled_features.numpy()
+
                 feature_file_path = os.path.join(output_dir, f"{class_name}_{i}_features.npy")
                 np.save(feature_file_path, pooled_features)
-
-                if class_name == 'person':
-                    cropped_img_path = os.path.join(output_dir, f"person_{i}.jpg")
-                    cropped_img.save(cropped_img_path)
-                    if not agent_flag:
+                if not agent_flag:
+                    if class_name == 'person':
+                        cropped_img_path = os.path.join(output_dir, f"person_{i}.jpg")
+                        cropped_img.save(cropped_img_path)
                         cropped_faces = run_openface(cropped_img_path, output_dir, i)
-                    if len(cropped_faces) != 0:
                         agent_flag = True
                 else:
                     cropped_img.save(os.path.join(output_dir, f"{class_name}_{i}.jpg"))
